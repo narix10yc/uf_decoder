@@ -1,41 +1,22 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
+.vscode/*
+.idea/*
 *.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
 *.exe
-*.out
-*.app
+examples/*
+*.rec
+.DS_Store
 
-# debug information files
-*.dwo
+# build folders
+build*
+debug-build/*
+release-build/*
+
+# analysis files
+tmp/*
+analysis/*
+*.csv
+
+# python-related
+python_envs/*
+*.ipynb
+_deps/*
