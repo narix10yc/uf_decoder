@@ -45,6 +45,8 @@ public:
 
   SmallString(const char* str) : SmallString(std::string_view(str)) {}
 
+  SmallString(const std::string& str) : SmallString(std::string_view(str)) {}
+
   SmallString(std::string_view sv) {
     if (sv.size() <= NumInline) {
       set_flag(static_cast<std::byte>(sv.size()));
@@ -130,6 +132,14 @@ public:
   }
 
 }; // SmallString
+
+inline bool operator==(const SmallString& lhs, const SmallString& rhs) {
+  return lhs.view() == rhs.view();
+}
+
+inline bool operator<(const SmallString& lhs, const SmallString& rhs) {
+  return lhs.view() < rhs.view();
+}
 
 } // namespace utils
 
