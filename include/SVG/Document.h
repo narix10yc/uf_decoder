@@ -3,9 +3,9 @@
 
 #include "SVG/Circle.h"
 #include "SVG/Line.h"
+#include "SVG/Path.h"
 #include "SVG/Rect.h"
 #include "SVG/Text.h"
-#include "SVG/Path.h"
 
 namespace svg {
 
@@ -23,6 +23,9 @@ public:
     bgColor_ = std::move(color);
     return *this;
   }
+
+  // Clear all elements in the document. This will not remove the background.
+  void clear() { objects_.clear(); }
 
   Line& addLine(float x1, float y1, float x2, float y2) {
     objects_.emplace_back(std::make_unique<Line>(x1, y1, x2, y2));

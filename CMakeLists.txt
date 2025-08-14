@@ -11,3 +11,4 @@ add_compile_options(-Wall)
 
 add_subdirectory(src)
 add_subdirectory(tools)
+add_subdirectory(python)
