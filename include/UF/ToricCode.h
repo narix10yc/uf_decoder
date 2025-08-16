@@ -27,8 +27,8 @@ template <int Nbits> class StaticBitArray {
   }
 
 public:
-  static consteval int numBits() { return Nbits; }
-  static consteval int numWords() { return NWords; }
+  static consteval int num_bits() { return Nbits; }
+  static consteval int num_words() { return NWords; }
 
   void clear() { w_.fill(0ULL); }
 
@@ -45,6 +45,11 @@ public:
   void flip(int i) { w_[i >> 6] ^= (1ULL << (i & 63)); }
   // Check if bit i is 1
   bool test(int i) const { return (w_[i >> 6] >> (i & 63)) & 1ULL; }
+
+  void set_word(int i, uint64_t value) {
+    assert(0 <= i && i < NWords);
+    w_[i] = value;
+  }
 
   uint64_t word(int i) const { return w_[i]; }
   uint64_t* words() { return w_.data(); }
@@ -89,6 +94,10 @@ public:
   }
 };
 
+template <int L> using ToricCodeError = StaticBitArray<2 * L * L>;
+
+template <int L> using ToricCodeSyndrome = StaticBitArray<L * L>;
+
 // ToricCode<L>: Toric code with L x L lattice
 template <int L> class ToricCode {
   static_assert(L >= 2, "L must be >= 2");
@@ -101,13 +110,14 @@ template <int L> class ToricCode {
 
 public:
   // Error bit arrays (length 2*L*L)
-  using ErrBitArray = StaticBitArray<2 * LL>;
+  using Error = ToricCodeError<L>;
   // Syndrome bit arrays (length L*L)
-  using SynBitArray = StaticBitArray<LL>;
+  using Syndrome = ToricCodeSyndrome<L>;
 
   // Error bitfields (zero-initialized)
-  ErrBitArray xErr{};
-  ErrBitArray zErr{};
+  Error xErr{};
+  Error zErr{};
+  Error erasureErr{};
 
   // ---------------- Indexing helpers ----------------
   // Qubits (edges) are divided into two groups:
@@ -120,7 +130,7 @@ public:
 
   // horizontal coordinate to global index
   // both r and c must be in [0, L)
-  int qubitIdx_HG(int r, int c) const {
+  static int qubitIdx_HG(int r, int c) {
     assert(0 <= r && r < L);
     assert(0 <= c && c < L);
     return r * L + c;
@@ -128,7 +138,7 @@ public:
 
   // vertical coordinate to global index
   // both r and c must be in [0, L)
-  int qubitIdx_VG(int r, int c) const {
+  static int qubitIdx_VG(int r, int c) {
     assert(0 <= r && r < L);
     assert(0 <= c && c < L);
     return LL + r * L + c;
@@ -136,14 +146,14 @@ public:
 
   // global index to horizontal coordinate
   // idx must be in [0, LL)
-  std::pair<int, int> qubitIdx_GH(int idx) const {
+  static std::pair<int, int> qubitIdx_GH(int idx) {
     assert(0 <= idx && idx < LL);
     return std::make_pair(idx / L, idx % L);
   }
 
   // global index to vertical coordinate
   // idx must be in [LL, 2*LL)
-  std::pair<int, int> qubitIdx_GV(int idx) const {
+  static std::pair<int, int> qubitIdx_GV(int idx) {
     assert(LL <= idx && idx < 2 * LL);
     return std::make_pair((idx - LL) / L, (idx - LL) % L);
   }
@@ -156,35 +166,53 @@ public:
 
   // ------------ Error manipulation ------------
 
-  template <class URNG> void injectPauliNoise(double pX, double pZ, URNG& rng) {
+  template <class URNG> void injectPauliNoise(float pX, float pZ, URNG& rng) {
     assert(0.0 <= pX && pX <= 1.0);
     assert(0.0 <= pZ && pZ <= 1.0);
-    std::bernoulli_distribution bx(pX), bz(pZ);
-    for (int q = 0; q < NQubits; ++q) {
-      if (bx(rng))
-        xErr.flip(q);
-      if (bz(rng))
-        zErr.flip(q);
+    if (pX > 0.0f) {
+      std::bernoulli_distribution b(pX);
+      for (int q = 0; q < NQubits; ++q)
+        if (b(rng))
+          xErr.flip(q);
+    }
+    if (pZ > 0.0f) {
+      std::bernoulli_distribution b(pZ);
+      for (int q = 0; q < NQubits; ++q)
+        if (b(rng))
+          zErr.flip(q);
     }
   }
 
-  template <class URNG> void injectZNoise(double p, URNG& rng) {
-    std::bernoulli_distribution b(p);
-    for (int q = 0; q < NQubits; ++q)
-      if (b(rng))
-        zErr.flip(q);
-  }
-
-  template <class URNG> void injectXNoise(double p, URNG& rng) {
-    std::bernoulli_distribution b(p);
-    for (int q = 0; q < NQubits; ++q)
-      if (b(rng))
-        xErr.flip(q);
+  template <class URNG> void injectErasureNoise(float p, URNG& rng) {
+    assert(0.0 <= p && p <= 1.0);
+    if (p > 0.0f) {
+      std::uniform_real_distribution<float> d(0.0f, 1.0f);
+      for (int q = 0; q < NQubits; ++q) {
+        auto r = d(rng);
+        if (r < 0.25f * p) {
+          // Erasure with I
+          erasureErr.flip(q);
+        } else if (r < 0.5f * p) {
+          // Erasure with X
+          xErr.flip(q);
+          erasureErr.flip(q);
+        } else if (r < 0.75f * p) {
+          // Erasure with Z
+          zErr.flip(q);
+          erasureErr.flip(q);
+        } else if (r < p) {
+          // Erasure with Y
+          xErr.flip(q);
+          zErr.flip(q);
+          erasureErr.flip(q);
+        }
+      }
+    }
   }
 
   // ------------ Syndromes ------------
-  SynBitArray computeZSyndrome() const {
-    SynBitArray syn;
+  Syndrome computeZSyndrome() const {
+    Syndrome syn;
     // Z syndrome (plaquettes) is computed by checking X errors on surrounding
     // edges
 
@@ -240,8 +268,8 @@ public:
     return syn;
   }
 
-  SynBitArray computeXSyndrome() const {
-    SynBitArray syn;
+  Syndrome computeXSyndrome() const {
+    Syndrome syn;
     // X syndrome (stars) is computed by checking Z errors on connected edges
 
     // Remark: L is a compile-time constant. Compilers will optimize away all
@@ -288,105 +316,6 @@ public:
     return syn;
   }
 
-  // Generate SVG representation of the surface code
-  void generateSVG(svg::Document& doc,
-                   bool showError = true,
-                   bool showSyndrome = true) const {
-    // Generate SVG code for the surface code representation
-    constexpr int PADDING = 15;  // Padding around the grid
-    constexpr int CELLSIZE = 40; // Size of each cell in the grid
-
-    auto& path = doc.addPath();
-
-    // horizontal lines
-    for (int row = 0; row < L; ++row) {
-      path.moveTo(PADDING, PADDING + row * CELLSIZE)
-          .hTo(PADDING + L * CELLSIZE);
-    }
-
-    // vertical lines
-    for (int col = 0; col < L; ++col) {
-      path.moveTo(PADDING + col * CELLSIZE, PADDING)
-          .vTo(PADDING + L * CELLSIZE);
-    }
-
-    // Draw error edges.
-    // Z only: blue
-    // X only: red
-    // both (Y error): green.
-    constexpr float STROKE_WIDTH = 3.0f;
-    if (showError) {
-      auto& pathZ =
-          doc.addPath().setStrokeWidth(STROKE_WIDTH).setStroke("blue");
-      auto& pathX = doc.addPath().setStrokeWidth(STROKE_WIDTH).setStroke("red");
-      auto& pathY =
-          doc.addPath().setStrokeWidth(STROKE_WIDTH).setStroke("green");
-      for (int r = 0; r < L; ++r) {
-        for (int c = 0; c < L; ++c) {
-          // horizontal edges
-          int idx_H = qubitIdx_HG(r, c);
-          auto x = xErr.test(idx_H);
-          auto z = zErr.test(idx_H);
-          if (x && z) {
-            pathY.moveTo(PADDING + c * CELLSIZE, PADDING + r * CELLSIZE)
-                .hTo(PADDING + (c + 1) * CELLSIZE);
-          } else if (x) {
-            pathX.moveTo(PADDING + c * CELLSIZE, PADDING + r * CELLSIZE)
-                .hTo(PADDING + (c + 1) * CELLSIZE);
-          } else if (z) {
-            pathZ.moveTo(PADDING + c * CELLSIZE, PADDING + r * CELLSIZE)
-                .hTo(PADDING + (c + 1) * CELLSIZE);
-          }
-
-          // vertical edges
-          int idx_V = qubitIdx_VG(r, c);
-          x = xErr.test(idx_V);
-          z = zErr.test(idx_V);
-          if (x && z) {
-            pathY.moveTo(PADDING + c * CELLSIZE, PADDING + r * CELLSIZE)
-                .vTo(PADDING + (r + 1) * CELLSIZE);
-          } else if (x) {
-            pathX.moveTo(PADDING + c * CELLSIZE, PADDING + r * CELLSIZE)
-                .vTo(PADDING + (r + 1) * CELLSIZE);
-          } else if (z) {
-            pathZ.moveTo(PADDING + c * CELLSIZE, PADDING + r * CELLSIZE)
-                .vTo(PADDING + (r + 1) * CELLSIZE);
-          }
-        }
-      }
-    }
-
-    // Syndrome
-    if (showSyndrome) {
-      auto zSyndrome = computeZSyndrome();
-      auto xSyndrome = computeXSyndrome();
-
-      // X syndrome: red circles on vertices
-      for (int i = 0; i < LL; ++i) {
-        if (xSyndrome.test(i)) {
-          auto [r, c] = qubitIdx_GH(i);
-          doc.addCircle(PADDING + c * CELLSIZE,
-                        PADDING + r * CELLSIZE,
-                        CELLSIZE * 0.1f)
-              .setFill("red");
-        }
-      }
-
-      // Z syndrome: blue rectangles on plaquettes
-      for (int i = 0; i < LL; ++i) {
-        if (zSyndrome.test(i)) {
-          auto [r, c] = qubitIdx_GH(i);
-          doc.addRect(PADDING + (c + 0.1f) * CELLSIZE,
-                      PADDING + (r + 0.1f) * CELLSIZE,
-                      CELLSIZE * 0.8f,
-                      CELLSIZE * 0.8f)
-              .setFill("blue")
-              .setOpacity(0.5f);
-        }
-      }
-    }
-
-  } // generateSVG
 };
 
 } // namespace uf

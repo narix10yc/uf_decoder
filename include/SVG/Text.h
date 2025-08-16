@@ -46,6 +46,11 @@ public:
     write_styles(os);
     os << '>' << content_ << "</" << element_name << ">\n";
   }
+
+  Bounds computeBounds() const {
+    // For simplicity, we assume the text is a point at (x, y)
+    return Bounds{x_, y_, x_, y_};
+  }
 };
 
 } // namespace svg

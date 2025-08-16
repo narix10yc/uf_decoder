@@ -1,4 +1,6 @@
-#pragma once
+#ifndef UF_UFDECODER_H
+#define UF_UFDECODER_H
+
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -26,8 +28,8 @@ template <int L> class UF3D_ToricDecoder {
   using Code = ToricCode<L>;
 
 public:
-  using ErrBits = typename Code::ErrBitArray; // 2 * L * L
-  using SynBits = typename Code::SynBitArray; // L * L
+  using Error = typename Code::Error;       // 2 * L * L
+  using Syndrome = typename Code::Syndrome; // L * L
 
 private:
   // ---- Space–time lattice sizes ----
@@ -139,7 +141,7 @@ private:
   // ==========================================================
   // (1) Build detection events from a time series of syndromes
   // ==========================================================
-  void build_detection_events(const std::vector<SynBits>& syndromes) {
+  void build_detection_events(const std::vector<Syndrome>& syndromes) {
     T_ = static_cast<int>(syndromes.size());
     Tlayers_ = T_ - 1;
     N_ = Tlayers_ * V;
@@ -289,7 +291,7 @@ private:
   // (4) Peeling: emit a spatial Z-correction
   // ==============================================
   static inline void
-  toggle_spatial_edge(ErrBits& corr, int r1, int c1, int r2, int c2) {
+  toggle_spatial_edge(Error& corr, int r1, int c1, int r2, int c2) {
     int q = data_qubit_from_adjacent_stars(r1, c1, r2, c2);
     corr.flip(q);
   }
@@ -298,7 +300,7 @@ private:
   // toggle spatial edges along the way. Returns the seed node index on success,
   // or -1 if no seed was encountered (shouldn’t happen for properly rooted
   // trees).
-  int peel_path_to_source(int u, ErrBits& corr) {
+  int peel_path_to_source(int u, Error& corr) {
     while (u != -1 && !det_[u]) {
       int p = parent_[u];
       Step s = parent_step_[u];
@@ -316,7 +318,7 @@ private:
     return (u != -1 && det_[u]) ? u : -1;
   }
 
-  void peel_and_emit_correction(ErrBits& corr) {
+  void peel_and_emit_correction(Error& corr) {
     for (const auto& m : meets_) {
       if (m.boundary) {
         (void)peel_path_to_source(m.a,
@@ -338,7 +340,7 @@ private:
   // =============================================================
   // 2D fallback: union-find on a single snapshot (perfect measurement)
   // =============================================================
-  ErrBits decode2D_from_snapshot(const SynBits& syn) {
+  Error decode2D_from_snapshot(const Syndrome& syn) {
     // Data structures local to 2D
     std::vector<uint8_t> det2(V, 0);
     std::vector<int> owner2(V, -1), parent2(V, -1);
@@ -420,7 +422,7 @@ private:
     }
 
     // Peeling
-    ErrBits corr; // zeroed
+    Error corr; // zeroed
     auto toggle_spatial = [&](int u, int v, Step2 s) {
       auto [r0, c0] = rc_of(u);
       auto [r1, c1] = rc_of(v);
@@ -455,8 +457,8 @@ public:
   // Input: syndromes[t] is the X-syndrome (stars) at round t, t=0..T-1.
   // Output: ErrBits mask of Z corrections over data qubits (2*L*L bits).
   // If all inter-round XORs are zero, falls back to 2D UF on the last snapshot.
-  ErrBits decode(const std::vector<SynBits>& syndromes) {
-    ErrBits corr; // zero-initialized
+  Error decode(const std::vector<Syndrome>& syndromes) {
+    Error corr; // zero-initialized
     const int T = static_cast<int>(syndromes.size());
     if (T <= 0)
       return corr;
@@ -475,9 +477,49 @@ public:
 };
 
 template <int L>
-ToricCode<L>::ErrBitArray
-decode(const std::vector<typename ToricCode<L>::SynBitArray>& syndromes) {
+ToricCode<L>::Error
+decode(const std::vector<typename ToricCode<L>::Syndrome>& syndromes) {
   UF3D_ToricDecoder<L> decoder;
   return decoder.decode(syndromes);
 }
+
+template <int L>
+ToricCode<L>::Error
+peeling_decode(const typename ToricCode<L>::Error& erasure,
+               const typename ToricCode<L>::Syndrome& xSyndrome,
+               const typename ToricCode<L>::Syndrome& zSyndrome) {}
+
+// Horizontal edges: [0 .. L*L-1], edge (r,c) connects (r,c)->(r,c+1)
+// Vertical edges:   [L*L .. 2*L*L-1], edge (r,c) connects (r,c)->(r+1,c)
+//
+// Given a Z operator on data edges (Error), return two bits
+// (b_h, b_v) where:
+//   b_h = 1 iff it anticommutes with the horizontal X logical (a loop of X
+//         on the horizontal edges of some fixed row r0)
+//   b_v = 1 iff it anticommutes with the vertical X logical (a loop of X
+//         on the vertical edges of some fixed column c0)
+//
+// Any choice of row r0 and column c0 works (homology invariance).
+// @return bit 0 gives the horizontal parity, bit 1 gives the vertical parity.
+template <int L>
+int compute_logical_op(typename ToricCode<L>::Error const& zOp,
+                       int r0 = 0,
+                       int c0 = 0) {
+  int b_h = 0; // parity vs X_h (horizontal loop on row r0)
+  for (int c = 0; c < L; ++c) {
+    int hIdx = r0 * L + c; // horizontal edge (r0, c)
+    b_h ^= zOp.test(hIdx) ? 1 : 0;
+  }
+
+  int b_v = 0; // parity vs X_v (vertical loop on col c0)
+  for (int r = 0; r < L; ++r) {
+    int vIdx = L * L + r * L + c0; // vertical edge (r, c0)
+    b_v ^= zOp.test(vIdx) ? 1 : 0;
+  }
+
+  return b_h | (b_v << 1); // return as a single int
+}
+
 } // namespace uf
+
+#endif // UF_UFDECODER_H

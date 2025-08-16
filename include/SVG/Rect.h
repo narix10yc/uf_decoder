@@ -62,6 +62,13 @@ public:
     write_styles(os);
     write_close(os);
   }
+
+  Bounds computeBounds() const override {
+    Bounds b;
+    b.include(x_, y_);
+    b.include(x_ + width_, y_ + height_);
+    return b;
+  }
 };
 
 } // namespace svg

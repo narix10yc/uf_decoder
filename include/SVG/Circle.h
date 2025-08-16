@@ -38,6 +38,13 @@ public:
     write_styles(os);
     write_close(os);
   }
+
+  Bounds computeBounds() const override {
+    Bounds b;
+    b.include(cx_ - r_, cy_ - r_);
+    b.include(cx_ + r_, cy_ + r_);
+    return b;
+  }
 };
 
 } // namespace svg

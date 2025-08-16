@@ -7,6 +7,7 @@ namespace svg {
 
 class Path : public SVGObject<Path> {
   std::string d_; // path data
+  Bounds bounds_;
 
   // append helpers
   void sp() { d_.push_back(' '); }
@@ -35,6 +36,7 @@ public:
     appendNumber(x);
     sp();
     appendNumber(y);
+    bounds_.include(x, y);
     return *this;
   }
 
@@ -44,6 +46,7 @@ public:
     appendNumber(x);
     sp();
     appendNumber(y);
+    bounds_.include(x, y);
     return *this;
   }
 
@@ -51,6 +54,7 @@ public:
     appendCmd('H');
     sp();
     appendNumber(x);
+    bounds_.include_x(x);
     return *this;
   }
 
@@ -58,6 +62,7 @@ public:
     appendCmd('V');
     sp();
     appendNumber(y);
+    bounds_.include_y(y);
     return *this;
   }
 
@@ -94,6 +99,10 @@ public:
     this->write_open(os);
     this->write_styles(os);
     this->write_close(os);
+  }
+
+  Bounds computeBounds() const override {
+    return bounds_;
   }
 }; // class Path
 
