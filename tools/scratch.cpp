@@ -10,37 +10,44 @@ using namespace uf;
 
 int main(int argc, char* argv[]) {
   assert(argc > 1 && "Usage: uf_decoder <output_file_prefix>");
-  
-  constexpr int L = 5; // 11x11 toric code
+
+  constexpr int L = 9; // 11x11 toric code
   auto t0 = std::chrono::high_resolution_clock::now();
+  auto t1 = std::chrono::high_resolution_clock::now();
 
   ToricCode<L> toric;
   ToricCodeVisualizer<L> visualizer;
 
   std::random_device rd;
   std::mt19937_64 rng(rd());
-  // toric.injectPauliNoise(0.00, 0.03, rng);
-  toric.injectErasureNoise(0.1, rng);
+  // std::mt19937_64 rng(43); // fixed seed for reproducibility
+
+  t0 = std::chrono::high_resolution_clock::now();
+  // toric.injectPauliNoise(0.00, 0.3, rng);
+  toric.injectErasureNoise(0.1f, rng);
   toric.xErr.clear(); // ignore X errors
-  // toric.zErr.flip(0);
-  // toric.zErr.flip(1);
-  // toric.zErr.flip(2);
-  // toric.zErr.flip(3);
-  // toric.zErr.flip(7);
-  // toric.zErr.flip(9);
-  auto t2 = std::chrono::high_resolution_clock::now();
-
-  auto zSyn = toric.computeZSyndrome(); // plaquette syndromes (X errors)
-  auto xSyn = toric.computeXSyndrome(); // star syndromes (Z errors)
-  auto t3 = std::chrono::high_resolution_clock::now();
-
+  // toric.zErr.set(1);
+  // toric.zErr.set(2);
+  // toric.erasureErr.flip(1);
+  // toric.erasureErr.flip(2);
+  // toric.erasureErr.flip(3);
+  // toric.erasureErr.flip(7);
+  // toric.erasureErr.flip(8);
+  // toric.erasureErr.flip(28);
+  // toric.erasureErr.flip(29);
+  t1 = std::chrono::high_resolution_clock::now();
   std::cout
       << "Noise injection time: "
-      << std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t0).count()
+      << std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()
       << " ns\n";
+
+  t0 = std::chrono::high_resolution_clock::now();
+  auto xSyn = toric.computeXSyndrome(); // star syndromes (Z errors)
+  t1 = std::chrono::high_resolution_clock::now();
+
   std::cout
       << "Syndrome computation time: "
-      << std::chrono::duration_cast<std::chrono::nanoseconds>(t3 - t2).count()
+      << std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()
       << " ns\n";
 
   toric.zErr.display(std::cerr << "Z errors:\n");
@@ -53,7 +60,7 @@ int main(int argc, char* argv[]) {
   visualizer.clearDocument();
   visualizer.drawLattice();
   visualizer.drawPauliErasureError(toric.xErr, toric.zErr, toric.erasureErr);
-  visualizer.drawSyndromes(xSyn, zSyn);
+  visualizer.drawSyndromeX(xSyn);
   ofs.open(fileName + ".original.svg");
   visualizer.render(ofs);
   ofs.close();
@@ -61,36 +68,41 @@ int main(int argc, char* argv[]) {
   visualizer.clearDocument();
   visualizer.drawLattice();
   visualizer.drawError(toric.erasureErr, visualizer.erasureErrColor);
-  visualizer.drawSyndromes(xSyn, zSyn);
+  visualizer.drawSyndromeX(xSyn);
   ofs.open(fileName + ".original.syndrome_only.svg");
   visualizer.render(ofs);
   ofs.close();
-  
-  std::vector<decltype(xSyn)> xSyndromes;
-  xSyndromes.push_back(xSyn);
 
-  std::vector<decltype(zSyn)> zSyndromes;
-  zSyndromes.push_back(zSyn);
-
-  auto t4 = std::chrono::high_resolution_clock::now();
-  UF3D_ToricDecoder<L> decoder;
-  auto zCorrection = decoder.decode(xSyndromes);
-  auto xCorrection = decoder.decode(zSyndromes);
-  auto t5 = std::chrono::high_resolution_clock::now();
-
+  t0 = std::chrono::high_resolution_clock::now();
+  auto adjacencies = build_star_adjacencies<L>();
+  t1 = std::chrono::high_resolution_clock::now();
   std::cout
-      << "Decode time: "
-      << std::chrono::duration_cast<std::chrono::nanoseconds>(t5 - t4).count()
+      << "Adjacency matrix build time: "
+      << std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()
       << " ns\n";
 
-  zCorrection.display(std::cerr << "Z correction:\n");
+  t0 = std::chrono::high_resolution_clock::now();
+  auto correction =
+      peeling_decode_Z<L>(toric.erasureErr, xSyn, adjacencies.get());
+  t1 = std::chrono::high_resolution_clock::now();
+  std::cout
+      << "Peeling decode time: "
+      << std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()
+      << " ns\n";
 
-  for (int i = 0; i < L * L; ++i) {
-    if (zCorrection.test(i))
-      toric.zErr.flip(i);
-    if (xCorrection.test(i))
-      toric.xErr.flip(i);
-  }
+  std::cerr << "Peeling decode correction:\n";
+  correction.display(std::cerr);
+
+  toric.zErr ^= correction;
+  xSyn = toric.computeXSyndrome(); // recompute X syndrome after correction
+
+  visualizer.clearDocument();
+  visualizer.drawLattice();
+  visualizer.drawPauliError(toric.xErr, toric.zErr);
+  visualizer.drawSyndromeX(xSyn);
+  ofs.open(fileName + ".decoded.syndrome_only.svg");
+  visualizer.render(ofs);
+  ofs.close();
 
   return 0;
 }

@@ -37,13 +37,13 @@ public:
     w_.back() &= tail_mask();
   }
 
-  // Set bit i to 1
+  // Set bit i to 1 (5 ops)
   void set(int i) { w_[i >> 6] |= (1ULL << (i & 63)); }
-  // Set bit i to 0
+  // Set bit i to 0 (6 ops)
   void unset(int i) { w_[i >> 6] &= ~(1ULL << (i & 63)); }
-  // Toggle bit i
+  // Toggle bit i (5 ops)
   void flip(int i) { w_[i >> 6] ^= (1ULL << (i & 63)); }
-  // Check if bit i is 1
+  // Check if bit i is 1 (5 ops)
   bool test(int i) const { return (w_[i >> 6] >> (i & 63)) & 1ULL; }
 
   void set_word(int i, uint64_t value) {
@@ -55,9 +55,43 @@ public:
   uint64_t* words() { return w_.data(); }
   const uint64_t* words() const { return w_.data(); }
 
-  void xor_with(const StaticBitArray& other) {
+  StaticBitArray operator^(const StaticBitArray& other) const {
+    StaticBitArray result;
+    for (int i = 0; i < NWords; ++i)
+      result.w_[i] = w_[i] ^ other.w_[i];
+    return result;
+  }
+
+  StaticBitArray operator&(const StaticBitArray& other) const {
+    StaticBitArray result;
+    for (int i = 0; i < NWords; ++i)
+      result.w_[i] = w_[i] & other.w_[i];
+    return result;
+  }
+
+  StaticBitArray operator|(const StaticBitArray& other) const {
+    StaticBitArray result;
+    for (int i = 0; i < NWords; ++i)
+      result.w_[i] = w_[i] | other.w_[i];
+    return result;
+  }
+
+  StaticBitArray& operator^=(const StaticBitArray& other) {
     for (int i = 0; i < NWords; ++i)
       w_[i] ^= other.w_[i];
+    return *this;
+  }
+
+  StaticBitArray& operator&=(const StaticBitArray& other) {
+    for (int i = 0; i < NWords; ++i)
+      w_[i] &= other.w_[i];
+    return *this;
+  }
+
+  StaticBitArray& operator|=(const StaticBitArray& other) {
+    for (int i = 0; i < NWords; ++i)
+      w_[i] |= other.w_[i];
+    return *this;
   }
 
   static inline int parity64(uint64_t x) {
@@ -225,6 +259,9 @@ public:
     // left edge   (V, r,     c    ),
     // right edge  (V, r,     c + 1).
 
+    // Loop through all plaquettes (L * L plaquettes in total). For each
+    // plaquette, check its 4 surrounding edges.
+
     int parity;
     for (int r = 0; r < L - 1; ++r) {
       for (int c = 0; c < L - 1; ++c) {
@@ -281,7 +318,10 @@ public:
     // left edge  (H, r,     c - 1),
     // right edge (H, r,     c    ).
 
-    // r = 0, c = 0 case
+    // Loop through all stars (L * L stars in total). For each star, check its
+    // 4 connected edges.
+
+    // (r,c) = (0, 0)
     int parity;
     parity = 0;
     parity ^= zErr.test(qubitIdx_VG(L - 1, 0)); // top (V, r - 1, c)
@@ -291,7 +331,7 @@ public:
     if (parity)
       syn.set(0);
 
-    // r = 0 case
+    // (r,c) = (0, 1 .. L-1)
     for (int c = 1; c < L; ++c) {
       parity = 0;
       parity ^= zErr.test(qubitIdx_VG(L - 1, c)); // top (V, r - 1, c)
@@ -302,6 +342,18 @@ public:
         syn.set(c);
     }
 
+    // (r,c) = (1 .. L-1, 0)
+    for (int r = 1; r < L; ++r) {
+      parity = 0;
+      parity ^= zErr.test(qubitIdx_VG(r - 1, 0)); // top (V, r - 1, c)
+      parity ^= zErr.test(qubitIdx_VG(r, 0));     // bottom (V, r, c)
+      parity ^= zErr.test(qubitIdx_HG(r, L - 1)); // left (H, r, c - 1)
+      parity ^= zErr.test(qubitIdx_HG(r, 0));     // right (H, r, c)
+      if (parity)
+        syn.set(r * L);
+    }
+
+    // (r,c) = (1 .. L-1, 1 .. L-1)
     for (int r = 1; r < L; ++r) {
       for (int c = 1; c < L; ++c) {
         parity = 0;
@@ -315,7 +367,6 @@ public:
     }
     return syn;
   }
-
 };
 
 } // namespace uf

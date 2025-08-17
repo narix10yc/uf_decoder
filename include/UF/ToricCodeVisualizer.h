@@ -58,6 +58,30 @@ public:
     doc_.setBackgroundColor(canvasBackgroundColor_);
   }
 
+  // Get the position of a star (vertex in the lattice) in the canvas
+  std::pair<float, float> getStarPosition(int r, int c) const {
+    assert(0 <= r && r < L);
+    assert(0 <= c && c < L);
+    return {latticePadding + c * cellSize, latticePadding + r * cellSize};
+  }
+
+  // Get the position of the center of a plaquette (face of the lattice) in the
+  // canvas
+  std::pair<float, float> getPlaquettePosition(int r, int c) const {
+    assert(0 <= r && r < L);
+    assert(0 <= c && c < L);
+    return {latticePadding + (c + 0.5f) * cellSize,
+            latticePadding + (r + 0.5f) * cellSize};
+  }
+
+  // Get the start position of an edge (qubit) in the canvas. The start position
+  // of (H,r,c) and (V,r,c) edges is the same.
+  std::pair<float, float> getEdgeStartPosition(int r, int c) const {
+    assert(0 <= r && r < L);
+    assert(0 <= c && c < L);
+    return {latticePadding + c * cellSize, latticePadding + r * cellSize};
+  }
+
   void drawLattice() {
     auto& path = doc_.addPath()
                      .setStrokeWidth(edgeStrokeWidth)
