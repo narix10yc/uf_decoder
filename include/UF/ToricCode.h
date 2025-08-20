@@ -9,6 +9,8 @@
 
 #include "SVG/Document.h"
 
+// (2L*L)
+
 namespace uf {
 
 // StaticBitArray<Nbits>: fixed-size bitset backed by 64-bit words
@@ -16,7 +18,7 @@ template <int Nbits> class StaticBitArray {
   static_assert(Nbits > 0, "Nbits must be positive");
   static constexpr int NBitsPerWord = 64;
   static constexpr int NWords = (Nbits + NBitsPerWord - 1) / NBitsPerWord;
-  std::array<uint64_t, NWords> w_{}; // zero-initialized
+  alignas(64) std::array<uint64_t, NWords> w_{}; // zero-initialized
 
   // Mark unused bits
   static constexpr uint64_t tail_mask() {

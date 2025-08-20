@@ -201,6 +201,50 @@ template <int L> std::unique_ptr<StarNeighbour[]> build_star_adjacencies() {
   return adjacencies;
 } // build_adjacencies
 
+// template <int L>
+// constexpr std::array<ToricCodeError, 2 * L * L> build_star_qubit_adjacency()
+// {
+//   // Star (vertex) (r, c) is connected to:
+//   // up qubit    (V, r - 1, c    ),
+//   // down qubit  (V, r,     c    ),
+//   // left qubit  (H, r,     c - 1),
+//   // right qubit (H, r,     c    ),
+
+//   using Code = ToricCode<L>;
+
+//   std::array<ToricCodeError, 2 * L * L> adjacency;
+//   for (int r = 0; r < L; ++r) {
+//     for (int c = 0; c < L; ++c) {
+//       const int starIdx = rc_<L>(r, c);
+//       // up qubit
+//       adjacency[starIdx].set(Code::qubitIdx_VG(r - 1, c));
+//       // down qubit
+//       adjacency[starIdx].set(Code::qubitIdx_VG(r, c));
+//       // left qubit
+//       adjacency[starIdx].set(Code::qubitIdx_HG(r, c - 1));
+//       // right qubit
+//       adjacency[starIdx].set(Code::qubitIdx_HG(r, c));
+//     }
+//   }
+//   return adjacency;
+// }
+
+// template<int L>
+// constexpr std::array<ToricCodeSyndrome, L*L> build_star_star_adjacency() {
+//   // Star (vertex) (r, c) is connected to:
+//   // up star    (r - 1, c    ),
+//   // down star  (r + 1, c    ),
+//   // left star  (r,     c - 1),
+//   // right star (r,     c + 1).
+//   constexpr auto rc = [](int r, int c) {
+
+//   }
+//   std::array<ToricCodeSyndrome, L * L> adjacency;
+//   for (int r = 0; r < L; ++r) {
+//     for (int c = 0; c < L; ++c) {
+//       const int starIdx = rc_<L>(r, c);
+// }
+
 // Return the erasure set
 template <int L>
 ToricCode<L>::Error cluster(const typename ToricCode<L>::Syndrome xSyndrome,
@@ -224,13 +268,12 @@ peeling_decode_Z(const typename ToricCode<L>::Error& erasure,
   // dsu stores the spanning forest of the syndrome graph (a graph with LL
   // vertices). dsu is to be indexed by stars
   DSU<L> dsu;
+  auto degrees = std::make_unique<uint8_t[]>(LL);
 
   // zero-initialized. forest is to be indexed by qubits
   Error forest{};
-  auto degrees = std::make_unique<uint8_t[]>(LL);
 
-  // Step 1: Build spanning forests (primal and dual) from the erased-edge
-  // subgraph
+  // Step 1: Build the spanning forest
 
   // edge (H,r,c) connects vertex (r,c) and vertex (r,c+1)
   for (int r = 0; r < L; ++r) {
@@ -238,9 +281,7 @@ peeling_decode_Z(const typename ToricCode<L>::Error& erasure,
       const int edge = rc(r, c);       // edge (H,r,c)
       const int vertexA = rc(r, c);    // vertex (r,c)
       const int vertexB = vertexA + 1; // vertex (r,c+1)
-      if (!erasure.test(vertexA))
-        continue;
-      if (dsu.unite(vertexA, vertexB)) {
+      if (erasure.test(edge) && dsu.unite(vertexA, vertexB)) {
         forest.flip(edge);
         degrees[vertexA] += 1;
         degrees[vertexB] += 1;
@@ -250,7 +291,7 @@ peeling_decode_Z(const typename ToricCode<L>::Error& erasure,
     const int edge = rc(r, L - 1);    // edge (H,r,L-1)
     const int vertexA = rc(r, L - 1); // vertex (r,L-1)
     const int vertexB = rc(r, 0);     // vertex (r,0)
-    if (erasure.test(vertexA) && dsu.unite(vertexA, vertexB)) {
+    if (erasure.test(edge) && dsu.unite(vertexA, vertexB)) {
       forest.flip(edge);
       degrees[vertexA] += 1;
       degrees[vertexB] += 1;
@@ -263,9 +304,7 @@ peeling_decode_Z(const typename ToricCode<L>::Error& erasure,
       const int edge = LL + rc(r, c);   // edge (V,r,c)
       const int vertexA = rc(r, c);     // vertex (r,c)
       const int vertexB = rc(r + 1, c); // vertex (r+1,c)
-      if (!erasure.test(edge))
-        continue;
-      if (dsu.unite(vertexA, vertexB)) {
+      if (erasure.test(edge) && dsu.unite(vertexA, vertexB)) {
         forest.flip(edge);
         degrees[vertexA] += 1;
         degrees[vertexB] += 1;
@@ -341,10 +380,10 @@ peeling_decode_Z(const typename ToricCode<L>::Error& erasure,
     }
   }
 
+  std::ofstream ofs;
+  int fileIdx = 0;
   DEBUG_PEELING_DECODER(
       std::cerr << "There are " << leafIdx << " pendant nodes in the forest.\n";
-      int fileIdx = 0;
-      std::ofstream ofs;
       visualizer.clearDocument();
       visualizer.drawLattice();
       visualizer.drawError(forest, "#4A0");
@@ -359,7 +398,7 @@ peeling_decode_Z(const typename ToricCode<L>::Error& erasure,
     const auto [edge, pendantStar, nonPendantStar] = leaves[--leafIdx];
     DEBUG_PEELING_DECODER(
         std::cerr << "Step " << fileIdx << ": [edge, pStar, npStar] = [" << edge
-                  << ", " << pendantStar << ", " << nonPendantStar << "]\n";)
+                  << ", " << pendantStar << ", " << nonPendantStar << "]\n";);
     assert(forest.test(edge));
     assert(degrees[pendantStar] == 1);
     assert(degrees[nonPendantStar] >= 1);
@@ -367,15 +406,15 @@ peeling_decode_Z(const typename ToricCode<L>::Error& erasure,
     // Fast path: if edge is a singleton leaf (the last leaf of this tree)
     if (degrees[nonPendantStar] == 1) {
       DEBUG_PEELING_DECODER(std::cerr
-                                << "Fast path: edge is a singleton tree.\n";)
+                                << "Fast path: edge is a singleton tree.\n";);
       if (xSyndrome.test(pendantStar)) {
         assert(xSyndrome.test(nonPendantStar));
         assert(!correction.test(edge));
         correction.set(edge);
         // no need to update syndromes at these two stars
         // as we won't use them anymore
-        xSyndrome.unset(pendantStar);
-        xSyndrome.unset(nonPendantStar);
+        // xSyndrome.unset(pendantStar);
+        // xSyndrome.unset(nonPendantStar);
       }
       forest.unset(edge);
       degrees[pendantStar] = 0;
@@ -386,7 +425,6 @@ peeling_decode_Z(const typename ToricCode<L>::Error& erasure,
     // Substep 1: Remove edge from the forest and update leaves.
     // DSU is not designed for removal. We won't update dsu.
     forest.unset(edge);
-    degrees[nonPendantStar] -= 1;
     // no need to update pendantStar's degree as we won't use it anymore
     // degrees[pendantStar] = 0;
 
